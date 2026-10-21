@@ -32,5 +32,5 @@ struct ClientInfo {
 };
 
 //espacio para declarar funciones
-
+int socket_plocket(int port);
 #endif
