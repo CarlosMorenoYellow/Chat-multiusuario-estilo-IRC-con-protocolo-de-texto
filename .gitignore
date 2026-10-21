@@ -1,0 +1,12 @@
+# Binarios ejecutables generados por make
+servidor
+cliente
+
+#Carpeta de buzones en disco generada por el servidor
+buzones/ 
+
+#Archivos generados por el compilador
+*.o
+
+#Archivos temporales del SO y IDEs (vscode)
+.vscode/
