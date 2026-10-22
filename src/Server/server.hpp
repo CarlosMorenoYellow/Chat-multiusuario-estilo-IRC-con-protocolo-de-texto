@@ -14,7 +14,6 @@
 #include <cstring>
 
 //constantes utiles
-const int MAX_CHAT_SIZE = 512;
 
 enum class ConnectType {
     CHAT,
