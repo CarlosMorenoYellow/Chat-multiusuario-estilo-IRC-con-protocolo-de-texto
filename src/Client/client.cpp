@@ -19,12 +19,20 @@ int main(int argc, char* argv[]) {
     
     //agarra ip y el puerto de los argumentos
     std::string ip = argv[1];
-    int puerto = std::stoi(argv[2]);
+    int puerto = 0;
 
-    // crea el socket TCP
-    int socfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (socfd < 0) {
-        perror("Error al crear socket\n");
+    try {
+
+        size_t idx = 0;
+        std::string puertoStr = argv[2];
+        puerto = std::stoi(puertoStr, &idx);
+
+        if (idx != puertoStr.length() || puerto <= 1023 || puerto > 65535){
+            std::cerr << "Error: Puerto debe ser un entero entre 1024 y 65535\n";
+            return 1;
+        }
+    } catch (...){
+        std::cerr << "Error: Puerto invalido ingresado. \n";
         return 1;
     }
 
@@ -32,8 +40,18 @@ int main(int argc, char* argv[]) {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(puerto);
-    inet_pton(AF_INET, ip.c_str(), &address.sin_addr);
 
+    if(inet_pton(AF_INET, ip.c_str(), &address.sin_addr) <= 0) {
+        std::cerr << "Error: Direccion IP no tiene formato valido \n";
+        return 1;
+    }
+
+    // crea el socket TCP
+    int socfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socfd < 0) {
+        perror("Error al crear socket\n");
+        return 1;
+    }
 
     // Conectar socket. Si falla se cierra el socket.
     if (connect(socfd, (struct sockaddr*)&address, sizeof(address)) < 0) {
@@ -72,7 +90,7 @@ int main(int argc, char* argv[]) {
             if (std::getline(std::cin, input)) {
                 //si el mensaje es muy grande se reporta error
                 if (input.size() > protocol::MAXCLIENTLINE){
-                    std::cout << protocol::ERRPERM_LONG_LINE + " Linea demasiado larga\r\n";
+                    std::cout << std::to_string(protocol::ERRPERM_LONG_LINE) + " Linea demasiado larga\r\n";
                     continue;
                 }
 
@@ -99,7 +117,7 @@ int main(int argc, char* argv[]) {
                 break;
             }
             
-            //alamcena bytes recibidos en la estructura LineBuffer
+            //almacena bytes recibidos en la estructura LineBuffer
             bufferCliente.append(temp, bytesRecibidos);
 
             //variables para usar en la funcion extraerLinea
@@ -110,6 +128,11 @@ int main(int argc, char* argv[]) {
             //y las imprime en pantalla
             while (bufferCliente.extraerLinea(msgServer, errorLargo)) {
                 std::cout << "[Servidor] " << msgServer + "\n";
+
+                if (msgServer.rfind("299", 0) == 0) {
+                    run = false;
+                    break;
+                }
             }
         }
     }
