@@ -57,9 +57,9 @@ int main() {
     std::vector<pollfd> fds;
     std::vector<ClientInfo> clients;
     fds.push_back({chat_space, POLLIN, 0});
-    clients.push_back({chat_space, ConnectType::CHAT, "", "", false, {}});
+    clients.push_back({chat_space, ConnectType::CHAT, "", "", false, {}, false});
     fds.push_back({http_space, POLLIN, 0});
-    clients.push_back({http_space, ConnectType::HTTP, "", "", false, {}});
+    clients.push_back({http_space, ConnectType::HTTP, "", "", false, {}, false});
 
     std::cout << "Sockets listos, esperando conecciones..." << std::endl;
 
@@ -86,7 +86,7 @@ int main() {
                 int new_client = accept(chat_space, nullptr, nullptr);
                 if (new_client >= 0) {
                     fds.push_back({new_client, POLLIN, 0});
-                    clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}});
+                    clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}, false});
                     std::cout << "Nuevo cliente añadido por chat " << new_client << std::endl;
                     std::string greet = "200 chat de prueba listo\r\n";
                     send(new_client, greet.c_str(), greet.size(), 0);
@@ -98,7 +98,7 @@ int main() {
                 int new_requester = accept(http_space, nullptr, nullptr);
                 if (new_requester >= 0) {
                     fds.push_back({new_requester, POLLIN, 0});
-                    clients.push_back({new_requester, ConnectType::HTTP, "", "", false, {}});
+                    clients.push_back({new_requester, ConnectType::HTTP, "", "", false, {}, false});
                     std::cout << "Nueva peticion por http con fd " << new_requester << std::endl; 
                 }
             }
@@ -116,6 +116,21 @@ int main() {
                     clients.erase(clients.begin() + i);
                 }
                 else {
+                    // Revisemos si hubo un exeso de datos
+                    if (clients[i].baddie_bad) {
+                        std::string trash(tmp_buffer, bytes);
+                        size_t recovery_point = trash.find("\r\n");
+
+                        if (recovery_point != std::string::npos){
+                            clients[i].baddie_bad = false;
+                            clients[i].read_buffer = trash.substr(recovery_point + 2);
+                        }
+                        else {
+                            clients[i].read_buffer.clear();                            
+                        }
+                        continue;
+                    }
+
                     // Leamos lo que envio el cliente y guardemoslo en su buffer personal
                     clients[i].read_buffer.append(tmp_buffer, bytes);
 
@@ -127,6 +142,7 @@ int main() {
                         if (limit_check == std::string::npos or limit_check > protocol::MAXCLIENTLINE) {
                             std::string oopsie_502 = "502 Linea demasiado larga\r\n";
                             send(fds[i].fd, oopsie_502.c_str(), oopsie_502.size(), 0);
+                            clients[i].baddie_bad = true;
                             clients[i].read_buffer.clear();
                             continue;
                         }
@@ -134,7 +150,7 @@ int main() {
                     
                     // Lo mismo pero el stream vino de http
                     if (clients[i].type == ConnectType::HTTP and clients[i].read_buffer.size() > 8192) {
-                        std::string http_oopsie_400 = "HTTP 400 Bad Request\n\rContent-Type: text/plain\n\rConnection: close\r\n\r\nMucho texto (mensaje muy largo)\n";
+                        std::string http_oopsie_400 = "HTTP 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMucho texto (mensaje muy largo)\n";
                         send(fds[i].fd, http_oopsie_400.c_str(), http_oopsie_400.size(), 0);
                         close(fds[i].fd);
                         fds.erase(fds.begin() + i);

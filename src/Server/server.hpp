@@ -28,6 +28,7 @@ struct ClientInfo {
     std::string nickname;
     bool verifiedName = false;
     std::vector<std::string> channels;
+    bool baddie_bad = false;
 };
 
 //espacio para declarar funciones

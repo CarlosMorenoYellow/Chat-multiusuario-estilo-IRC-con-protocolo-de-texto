@@ -46,5 +46,5 @@ bool LineBuffer::extraerLinea(std::string &linea, bool &errorLargo){
 
 //Clear para LineBuffer
 void LineBuffer::clear() {
-    buffer.clear()
+    buffer.clear();
 }
