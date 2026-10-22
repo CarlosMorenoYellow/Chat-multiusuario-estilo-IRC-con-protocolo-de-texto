@@ -2,6 +2,69 @@
 #include "../Commons/Protocol.hpp"
 #include "../Commons/Protocol.cpp"
 
+
+// Funcion para leer comandos
+void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string message){
+    std::string cmd = message;
+    std::string args = "";
+    size_t gap = message.find(" ");
+
+    if (gap != std::string::npos) {
+        cmd = message.substr(0, gap);
+        args = message.substr(gap + 1);
+    }
+
+    int client_fd = fds[index].fd;
+    ClientInfo& current_client = clients[index];
+
+    if (!current_client.verifiedName and cmd != "NICK" and cmd != "QUIT") {
+        std::string oopsie_530 = "530 No te has gesitrado con NICK\r\n";
+        send(client_fd, oopsie_530.c_str(), oopsie_530.size(), 0);
+        return;
+    }
+
+    if (cmd == "NICK") {
+        if (args.empty()) {
+            std::string oopsie_501 = "501 Sintaxis invalida, debes escribir un nombre\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        if (!(protocol::validarApodo(args))) {
+            std::string oopsie_501 = "501 Sintaxis invalida, el apodo no cumple con las restricciones\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        for (size_t i = 0; i < clients.size(); ++i) {
+            if(i != index and clients[i].nickname == args) {
+                std::string oopsie_433 = "433 Ese nombre esta ocupado en este momento\r\n";
+                send(client_fd, oopsie_433.c_str(), oopsie_433.size(), 0);
+                return;
+            }
+        }
+
+        current_client.nickname = args;
+        current_client.verifiedName = true;
+
+        std::string goodie_201 = "201 Bienvenido(a), " + args + "\r\n";
+        send(client_fd, goodie_201.c_str(), goodie_201.size(), 0);
+        std::cout << client_fd << " se ha logueado con el apodo " << args << std::endl;
+    }
+    else if (cmd == "QUIT") {
+        std::string goodie_299 = "299 Bye bye!\r\n";
+        send(client_fd, goodie_299.c_str(), goodie_299.size(), 0);
+        std::cout << client_fd << " se esta largando con QUIT" << std::endl;
+        close(client_fd);
+        fds.erase(fds.begin() + index);
+        clients.erase(clients.begin() + index);
+    }
+    else {
+        std::string oopsie_500 = "500 Comando desconocido\r\n";
+        send(client_fd, oopsie_500.c_str(), oopsie_500.size(), 0);
+    }
+}
+
 // Funcion para abrir sockets
 int socket_plocket(int port){
     // Preparemos recursos para abrir socket
@@ -167,7 +230,8 @@ int main() {
 
                         // Es un mensaje de CHAT?
                         if (clients[i].type == ConnectType::CHAT) {
-                            std::cout << "Commando recibido de " << fds[i].fd << ":" << pure_mesage << std::endl;
+                            process_command(i, fds, clients, pure_mesage);
+                            std::cout << "Mensaje recibido de " << fds[i].fd << ":" << pure_mesage << std::endl;
                         }
                         
                         // Entonces es de HTTP
