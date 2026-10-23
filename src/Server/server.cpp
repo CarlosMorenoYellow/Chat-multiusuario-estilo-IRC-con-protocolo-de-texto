@@ -634,11 +634,24 @@ int main(int argc, char* argv[]) {
             if (fds[i].fd == chat_space) {
                 int new_client = accept(chat_space, nullptr, nullptr);
                 if (new_client >= 0) {
-                    fds.push_back({new_client, POLLIN, 0});
-                    clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}, false, {}, {}});
-                    std::cout << "Nuevo cliente añadido por chat " << new_client << std::endl;
-                    std::string greet = "200 chat de prueba listo\r\n";
-                    send(new_client, greet.c_str(), greet.size(), 0);
+                    size_t client_count = 0;
+                    for (const ClientInfo& client : clients) {
+                        if (client.type == ConnectType::CHAT && client.fd != chat_space) {
+                            ++client_count;
+                        }
+                    }
+
+                    if (client_count >= protocol::MAXCLIENTNUMBER) {
+                        std::string saturated = std::to_string(protocol::ERRTEMP_SERVER_SATURATED) + " Servidor saturado\r\n";
+                        send(new_client, saturated.c_str(), saturated.size(), 0);
+                        close(new_client);
+                    } else {
+                        fds.push_back({new_client, POLLIN, 0});
+                        clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}, false, {}, {}});
+                        std::cout << "Nuevo cliente añadido por chat " << new_client << std::endl;
+                        std::string greet = "200 chat de prueba listo\r\n";
+                        send(new_client, greet.c_str(), greet.size(), 0);
+                    }
                 }
             }
 

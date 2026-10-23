@@ -10,6 +10,7 @@ namespace protocol {
 constexpr std::size_t MAXCLIENTLINE = 512;
 constexpr std::size_t MAXNICKNAME = 16;
 constexpr std::size_t MAXCANAL = 32;
+constexpr std::size_t MAXCLIENTNUMBER = 300;
 
 // CODIGOS 2XX: EXITO
 
