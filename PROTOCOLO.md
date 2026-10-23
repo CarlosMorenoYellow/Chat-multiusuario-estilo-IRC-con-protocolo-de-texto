@@ -96,11 +96,86 @@ Cada otro miembro de `#redes` recibe:
 S: 300 #redes ana: hola
 ```
 
+### Mensaje privado en vivo
+
+Si `luis` está conectado, `ana` envía:
+
+```text
+C: PRIV luis Hola, Luis
+S (ana): 250 OK
+S (luis): 301 ana Hola, Luis
+```
+
+### Mensaje privado guardado en el buzón
+
+Si `luis` ya fue registrado anteriormente pero está desconectado, el servidor
+guarda el mensaje para su próxima sesión:
+
+```text
+C (ana): PRIV luis Hola, Luis
+S (ana): 251 Mensaje guardado en buzon
+```
+
+Cuando `luis` vuelva a conectarse y ejecute `NICK luis`, el servidor le avisará
+cuántos mensajes tiene pendientes:
+
+```text
+S (luis): 303 Tienes 1 mensajes!
+```
+
+### Consultar el buzón
+
+Suponiendo que el buzón de `luis` contiene un mensaje, `STAT` devuelve la
+cantidad de mensajes activos y el total de bytes de sus archivos. `<bytes>` es
+un marcador: el tamaño concreto depende del mensaje guardado.
+
+```text
+C (luis): STAT
+S (luis): 220 1 <bytes>
+```
+
+`LIST` enumera los mensajes activos con su número y tamaño, seguido del total:
+
+```text
+C (luis): LIST
+S (luis): 221-1 <bytes>
+S (luis): 221 1 mensajes
+```
+
+`RETR` devuelve el mensaje numerado. Cada línea del archivo se anuncia con el
+código `222-`; el último renglón termina la respuesta:
+
+```text
+C (luis): RETR 1
+S (luis): 222-From: ana@chat.ci4835
+S (luis): 222-To: luis@chat.ci4835
+S (luis): 222-Date: <fecha del servidor>
+S (luis): 222-Subject: Mensaje privado de ana
+S (luis): 222-Message-ID: <identificador generado por el servidor
+S (luis): 222-
+S (luis): 222-Hola, Luis
+S (luis): 222 fin del mensaje
+```
+
+`DELE` marca el mensaje para borrarlo; el borrado se aplica al cerrar la sesión
+con `QUIT`:
+
+```text
+C (luis): DELE 1
+S (luis): 223 Mensaje 1 marcado para borrar
+C (luis): QUIT
+S (luis): 299 Bye bye!
+```
+
+Antes de `QUIT`, el mensaje marcado ya no aparece en `STAT` ni `LIST`, y no se
+puede recuperar con `RETR`. Si el número no existe o ya fue marcado, el servidor
+responde `552`.
+
 ### Error por falta de registro
 
 ```text
 C: WHO #redes
-S: 530 No te has gesitrado con NICK
+S: 530 No te has registrado con NICK
 ```
 
 ### Consulta de miembros
@@ -136,4 +211,4 @@ S: 213 2 miembros
 	un `CRLF`. El límite operativo se mide en bytes, no en caracteres Unicode.
 - **Desconexión abrupta:** el servidor quita al socket desconectado de sus canales y elimina aquellos que queden vacíos.
 - **Usuario hace join a un canal en el que ya esta:** Manda verificacion al usuario de que se unio y se lee en el servidor su accion, mas no crea una segunda instancia del usuario. Efectivamente no hace nada.
-- **Usuario usa nick por segunda vez:**
+- **Usuario usa nick por segunda vez:** Directamente no lo permite. manda un mensaje informando que aquello no esta permitido.
