@@ -218,6 +218,19 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         response_buffer += "213 " + std::to_string(member_fds.size()) + " miembro(s)\r\n";
         send(client_fd, response_buffer.c_str(), response_buffer.size(), 0);
     }
+
+    else if (cmd == "CHANS") {
+        std::string response_buffer = "";
+        size_t total_channels = channels.size();
+        for (const auto& tup: channels) {
+            std::string chan_name = tup.first;
+            size_t total_members = tup.second.size();
+            response_buffer += "212- " + chan_name + " " + std::to_string(total_members) + "\r\n";
+        }
+
+        response_buffer += "212 " + std::to_string(total_channels) + " canales\r\n";
+        send(client_fd, response_buffer.c_str(), response_buffer.size(), 0);
+    }
     
     else {
         std::string oopsie_500 = "500 Comando desconocido\r\n";
