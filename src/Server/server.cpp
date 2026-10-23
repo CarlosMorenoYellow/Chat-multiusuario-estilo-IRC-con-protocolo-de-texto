@@ -196,7 +196,7 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
 
     if (cmd == "NICK") {
         if (current_client.verifiedName) {
-            std::string oopsie_501 = "501 No puedes cambiar tu apodo, ya tienes uno";
+            std::string oopsie_501 = "501 No puedes cambiar tu apodo, ya tienes uno\r\n";
             send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
             return;
         }
