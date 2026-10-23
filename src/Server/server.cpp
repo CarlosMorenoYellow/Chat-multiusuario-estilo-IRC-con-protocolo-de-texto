@@ -578,9 +578,9 @@ int main(int argc, char* argv[]) {
             chat_port = std::stoi(argv[++i]);
         }
         else if (flag == "--http" and i + 1 < argc) {
-            http_port = std::stoi(argv[i++]);
+            http_port = std::stoi(argv[++i]);
         }
-        else if (flag == "--buzones" and i + 1  < argc) {
+        else if (flag == "--buzones" and i + 1 < argc) {
             global_mailbox = argv[++i];
         }
     }
