@@ -113,6 +113,39 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         std::string goodie_211 = "211 Salida del canal exitosa\r\n";
         send(client_fd, goodie_211.c_str(), goodie_211.size(), 0);
     }
+    else if (cmd == "MSG") { 
+        size_t space = args.find(" ");
+        if (args.empty() or space == std::string::npos) {
+            std::string oopsie_501 = "501 Sintaxis invalida. Debes colocar el canal que deseas mensajear y el mensaje\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        std::string target_channel = args.substr(0, space);
+        std::string message = args.substr(space + 1);
+
+        if (channels.find(target_channel) == channels.end()) {
+            std::string oopsie_551 = "551 Ese canal no existe\r\n";
+            send(client_fd, oopsie_551.c_str(), oopsie_551.size(), 0);
+            return;
+        }
+
+        const auto& members = channels[target_channel];
+        if(std::find(members.begin(), members.end(), client_fd) == members.end()) {
+            std::string oopsie_442 = "442 No eres miembro de este canal\r\n";
+            send(client_fd, oopsie_442.c_str(), oopsie_442.size(), 0);
+            return;
+        }
+
+        std::string goodie_250 = "250 OK!\r\n";
+        send(client_fd, goodie_250.c_str(), goodie_250.size(), 0);
+        std::string worldwidenoise = "300 " + target_channel + " " + current_client.nickname + ": " + message + "\r\n";
+        for (int member_fd: members) {
+            if (member_fd != client_fd) {
+                send(member_fd, worldwidenoise.c_str(), worldwidenoise.size(), 0);
+            }
+        }
+    }
     else {
         std::string oopsie_500 = "500 Comando desconocido\r\n";
         send(client_fd, oopsie_500.c_str(), oopsie_500.size(), 0);
