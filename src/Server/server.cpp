@@ -2,6 +2,24 @@
 #include "../Commons/Protocol.hpp"
 #include "../Commons/Protocol.cpp"
 
+// Funcion para eliminar la presencia de un usuario
+void remover(
+    int client_fd,
+    const std::vector<std::string>& channel_names,
+    std::map<std::string, std::vector<int>>& channels) {
+    for (const auto& channel_name : channel_names) {
+        auto channel = channels.find(channel_name);
+        if (channel == channels.end()) {
+            continue;
+        }
+
+        auto& members = channel->second;
+        members.erase(std::remove(members.begin(), members.end(), client_fd), members.end());
+        if (members.empty()) {
+            channels.erase(channel);
+        }
+    }
+}
 
 // Funcion para leer comandos
 void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string message, std::map<std::string, std::vector<int>>& channels){
@@ -57,6 +75,7 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         std::string goodie_299 = "299 Bye bye!\r\n";
         send(client_fd, goodie_299.c_str(), goodie_299.size(), 0);
         std::cout << client_fd << " se esta largando con QUIT" << std::endl;
+        remover(client_fd, current_client.channels, channels);
         close(client_fd);
         fds.erase(fds.begin() + index);
         clients.erase(clients.begin() + index);
@@ -146,6 +165,37 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
             }
         }
     }
+    else if (cmd == "WHO") {
+        if(args.empty() or !protocol::validarCanal(args)) {
+            std::string oopsie_501 = "501 Sintaxis invalida. Debe haber un canal valido como argumento.\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        if (channels.find(args) == channels.end()) {
+            std::string oopsie_551 = "551 Ese canal no existe\r\n";
+            send(client_fd, oopsie_551.c_str(), oopsie_551.size(), 0);
+            return;
+        }
+
+        const auto& member_fds = channels[args];
+        std::string response_buffer = "";
+        for (int m_fd: member_fds) {
+            std::string user_nick = "dummy";
+            for (const auto& client: clients) {
+                if (client.fd == m_fd) {
+                    user_nick = client.nickname;
+                    break;
+                }
+            }
+
+            response_buffer += "213-" + user_nick + "\r\n";
+        }
+
+        response_buffer += "213 " + std::to_string(member_fds.size()) + " miembros\r\n";
+        send(client_fd, response_buffer.c_str(), response_buffer.size(), 0);
+    }
+    
     else {
         std::string oopsie_500 = "500 Comando desconocido\r\n";
         send(client_fd, oopsie_500.c_str(), oopsie_500.size(), 0);
@@ -264,13 +314,7 @@ int main() {
                 // Si encontramos un error o no hay informacion, perdimos el cliente
                 if (bytes <= 0) {
                     std::cout << "Cliente con FD " << fds[i].fd << " desconectado" << std::endl;
-                    for(const auto& channel: clients[i].channels) {
-                        auto& members = channels[channel];
-                        auto mit = std::find(members.begin(), members.end(), fds[i].fd);
-                        if (mit != members.end()) {
-                            members.erase(mit);
-                        }
-                    }
+                    remover(fds[i].fd, clients[i].channels, channels);
                     close(fds[i].fd);
                     fds.erase(fds.begin() + i);
                     clients.erase(clients.begin() + i);
@@ -327,8 +371,12 @@ int main() {
 
                         // Es un mensaje de CHAT?
                         if (clients[i].type == ConnectType::CHAT) {
+                            int client_fd = fds[i].fd;
                             process_command(i, fds, clients, pure_mesage, channels);
-                            std::cout << "Mensaje recibido de " << fds[i].fd << ":" << pure_mesage << std::endl;
+                            if (i >= fds.size() || fds[i].fd != client_fd) {
+                                break;
+                            }
+                            std::cout << "Mensaje recibido de " << client_fd << ":" << pure_mesage << std::endl;
                         }
                         
                         // Entonces es de HTTP

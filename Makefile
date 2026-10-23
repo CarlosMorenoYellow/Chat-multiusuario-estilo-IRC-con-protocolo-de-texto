@@ -1,7 +1,7 @@
 cc = g++
 flags = -std=c++17 -Wall -Wextra -pthread
 
-all: servidor 
+all: servidor cliente
 
 servidor: src/Server/server.cpp src/Server/server.hpp
 		$(cc) $(flags) src/Server/server.cpp -o servidor
