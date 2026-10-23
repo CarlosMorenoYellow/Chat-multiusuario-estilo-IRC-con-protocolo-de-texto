@@ -21,7 +21,7 @@ void remover(
     }
 }
 
-// Funcion para leer comandos
+// Funcion para leer y ejecutar comandos
 void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string message, std::map<std::string, std::vector<int>>& channels){
     std::string cmd = message;
     std::string args = "";
@@ -75,6 +75,17 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         std::string goodie_299 = "299 Bye bye!\r\n";
         send(client_fd, goodie_299.c_str(), goodie_299.size(), 0);
         std::cout << client_fd << " se esta largando con QUIT" << std::endl;
+
+        for (const auto& channel: current_client.channels) {
+            auto& members = channels[channel];
+            std::string quit_message = "302 " + channel + " " + current_client.nickname + " cerro sesion\r\n";
+            for(int member_fd: members) {
+                if (member_fd != client_fd) {
+                    send(member_fd, quit_message.c_str(), quit_message.size(), 0);
+                }
+            }
+        }
+
         remover(client_fd, current_client.channels, channels);
         close(client_fd);
         fds.erase(fds.begin() + index);
@@ -90,6 +101,11 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         auto& members = channels[args];
 
         if (std::find(members.begin(), members.end(), client_fd) == members.end()) {
+            std::string join_message = "302 " + args + " " + current_client.nickname + " se ha unido!\r\n";
+            for (int member_fd: members) {
+                send(member_fd, join_message.c_str(), join_message.size(), 0);
+            }
+
             members.push_back(client_fd);
             current_client.channels.push_back(args);
         }
@@ -116,6 +132,13 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
             std::string oopsie_442 = "442 No eres miembro del canal\r\n";
             send(client_fd, oopsie_442.c_str(), oopsie_442.size(), 0);
             return;
+        }
+
+        std::string exit_message = "302 " + args + " " + current_client.nickname + " ha salido del chat\r\n";
+        for (int member_fd: members) {
+            if (member_fd != client_fd) {
+                send(member_fd, exit_message.c_str(), exit_message.size(), 0);
+            }
         }
 
         members.erase(it);
@@ -192,7 +215,7 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
             response_buffer += "213-" + user_nick + "\r\n";
         }
 
-        response_buffer += "213 " + std::to_string(member_fds.size()) + " miembros\r\n";
+        response_buffer += "213 " + std::to_string(member_fds.size()) + " miembro(s)\r\n";
         send(client_fd, response_buffer.c_str(), response_buffer.size(), 0);
     }
     
@@ -314,6 +337,17 @@ int main() {
                 // Si encontramos un error o no hay informacion, perdimos el cliente
                 if (bytes <= 0) {
                     std::cout << "Cliente con FD " << fds[i].fd << " desconectado" << std::endl;
+
+                    for (const auto& channel: clients[i].channels) {
+                        auto& members = channels[channel];
+                        std::string disccon_message = "302 " + channel + " " + clients[i].nickname + " ha perdido conexion\r\n";
+                        for (int member_fd: members) {
+                            if (member_fd != fds[i].fd) {
+                                send(member_fd, disccon_message.c_str(), disccon_message.size(), 0);
+                            }
+                        }
+                    }
+
                     remover(fds[i].fd, clients[i].channels, channels);
                     close(fds[i].fd);
                     fds.erase(fds.begin() + i);
