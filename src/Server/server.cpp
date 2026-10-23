@@ -4,7 +4,7 @@
 
 
 // Funcion para leer comandos
-void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string message){
+void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string message, std::map<std::string, std::vector<int>>& channels){
     std::string cmd = message;
     std::string args = "";
     size_t gap = message.find(" ");
@@ -13,6 +13,8 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         cmd = message.substr(0, gap);
         args = message.substr(gap + 1);
     }
+
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
 
     int client_fd = fds[index].fd;
     ClientInfo& current_client = clients[index];
@@ -58,6 +60,58 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         close(client_fd);
         fds.erase(fds.begin() + index);
         clients.erase(clients.begin() + index);
+    }
+    else if (cmd == "JOIN") {
+        if (args.empty() or !protocol::validarCanal(args)) {
+            std::string oopsie_501 = "501 Sntaxis de canal invalida\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        auto& members = channels[args];
+
+        if (std::find(members.begin(), members.end(), client_fd) == members.end()) {
+            members.push_back(client_fd);
+            current_client.channels.push_back(args);
+        }
+
+        std::string goodie_210 = "210 Te uniste a " + args + "\r\n";
+        send(client_fd, goodie_210.c_str(), goodie_210.size(), 0);
+        std::cout << current_client.nickname << " se a unido al canal" << args << std::endl;
+    }
+    else if (cmd == "PART") {
+        if (args.empty()) {
+            std::string oopsie_501 = "501 No se especifico canal\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+        if (channels.find(args) == channels.end()) {
+            std::string oopsie_551 = "551 Ese canal no existe\r\n";
+            send(client_fd, oopsie_551.c_str(), oopsie_551.size(), 0);
+            return;
+        }
+        auto& members = channels[args];
+        auto it = std::find(members.begin(), members.end(), client_fd);
+
+        if (it == members.end()) {
+            std::string oopsie_442 = "442 No eres miembro del canal\r\n";
+            send(client_fd, oopsie_442.c_str(), oopsie_442.size(), 0);
+            return;
+        }
+
+        members.erase(it);
+        
+        auto cl_it = std::find(current_client.channels.begin(), current_client.channels.end(), args);
+        if (cl_it != current_client.channels.end()) {
+            current_client.channels.erase(cl_it);
+        }
+
+        if (members.empty()) {
+            channels.erase(args);
+        }
+
+        std::string goodie_211 = "211 Salida del canal exitosa\r\n";
+        send(client_fd, goodie_211.c_str(), goodie_211.size(), 0);
     }
     else {
         std::string oopsie_500 = "500 Comando desconocido\r\n";
@@ -124,6 +178,9 @@ int main() {
     fds.push_back({http_space, POLLIN, 0});
     clients.push_back({http_space, ConnectType::HTTP, "", "", false, {}, false});
 
+    // Tambien creemos los canales
+    std::map<std::string, std::vector<int>> channels;
+
     std::cout << "Sockets listos, esperando conecciones..." << std::endl;
 
     while (true){
@@ -174,6 +231,13 @@ int main() {
                 // Si encontramos un error o no hay informacion, perdimos el cliente
                 if (bytes <= 0) {
                     std::cout << "Cliente con FD " << fds[i].fd << " desconectado" << std::endl;
+                    for(const auto& channel: clients[i].channels) {
+                        auto& members = channels[channel];
+                        auto mit = std::find(members.begin(), members.end(), fds[i].fd);
+                        if (mit != members.end()) {
+                            members.erase(mit);
+                        }
+                    }
                     close(fds[i].fd);
                     fds.erase(fds.begin() + i);
                     clients.erase(clients.begin() + i);
@@ -230,7 +294,7 @@ int main() {
 
                         // Es un mensaje de CHAT?
                         if (clients[i].type == ConnectType::CHAT) {
-                            process_command(i, fds, clients, pure_mesage);
+                            process_command(i, fds, clients, pure_mesage, channels);
                             std::cout << "Mensaje recibido de " << fds[i].fd << ":" << pure_mesage << std::endl;
                         }
                         
