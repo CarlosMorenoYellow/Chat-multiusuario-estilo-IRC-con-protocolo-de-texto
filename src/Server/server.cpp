@@ -2,6 +2,20 @@
 #include "../Commons/Protocol.hpp"
 #include "../Commons/Protocol.cpp"
 
+std::map<std::string, std::deque<MessageHistory>> global_history;
+
+// Fucion para obtener hora
+std::string get_time() {
+    std::time_t now = std::time(nullptr);
+    std::tm* info = std::localtime(&now);
+    std::ostringstream oss;
+    oss << std::setfill('0')
+        << std::setw(2) << info->tm_hour << ":"
+        << std::setw(2) << info->tm_min << ":"
+        << std::setw(2) << info->tm_sec;
+    return oss.str();
+}
+
 // Funcion para eliminar la presencia de un usuario
 void remover(
     int client_fd,
@@ -18,6 +32,81 @@ void remover(
         if (members.empty()) {
             channels.erase(channel);
         }
+    }
+}
+
+void process_request(size_t index, std::vector<pollfd>& fds, std::vector<ClientInfo>& clients, const std::string& request, std::map<std::string, std::vector<int>>& channels) {
+    int client_fd = fds[index].fd;
+    size_t first_space = request.find(" ");
+    if(first_space == std::string::npos) {
+        std::string resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 16\r\nConnection: close\r\n\r\nMalformed Request";
+        send(client_fd, resp.c_str(), resp.size(), 0);
+        return;
+    }
+
+    std::string method = request.substr(0, first_space);
+    size_t second_space = request.find(" ", first_space + 1);
+    if (second_space == std::string::npos) {
+        std::string resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 16\r\nConnection: close\r\n\r\nMalformed Request";
+        send(client_fd, resp.c_str(), resp.size(), 0);
+        return;
+    }
+
+    std::string path = request.substr(first_space + 1, second_space - (first_space + 1));
+    if (method != "GET") {
+        std::string resp = "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 18\r\nConnection: close\r\n\r\nMethod Not Allowed";
+        send(client_fd, resp.c_str(), resp.size(), 0);
+        return;
+    }
+
+    std::string response_buffer = "";
+    bool found = false;
+
+    if (path == "/usuarios") {
+        found = true;
+        for (const auto& client: clients) {
+            if (client.type == ConnectType::CHAT and !client.nickname.empty() and client.verifiedName) {
+                response_buffer += client.nickname + "\n";
+            }
+        }
+    }
+    else if (path == "/canales") {
+        found = true;
+        for (const auto& tup: channels) {
+            response_buffer += tup.first + " " + std::to_string(tup.second.size()) + "\n";
+        }
+    }
+    else if (path.rfind("/historial/", 0) == 0) {
+        std::string target_channel = '#' + path.substr(11);
+        if (channels.find(target_channel) == channels.end()) {
+            std::string resp = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 17\r\nConnection: close\r\n\r\nNo Such Channel";
+            send(client_fd, resp.c_str(), resp.size(), 0);
+            return;
+        }
+
+        found = true;
+        auto it = global_history.find(target_channel);
+        if (it != global_history.end()) {
+            for (const auto& msg: it->second) {
+                response_buffer += "[" + msg.time + "]" + msg.nick + ": " + msg.text + "\n";
+            }
+        }
+    }
+
+    if (!found) {
+        std::string resp = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found";
+        send(client_fd, resp.c_str(), resp.size(), 0);
+    }
+    else {
+        std::string headers = 
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "Content-Length: " + std::to_string(response_buffer.size()) + "\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        
+        std::string answer = headers + response_buffer;
+        send(client_fd, answer.c_str(), answer.size(), 0);
     }
 }
 
@@ -181,6 +270,18 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
 
         std::string goodie_250 = "250 OK!\r\n";
         send(client_fd, goodie_250.c_str(), goodie_250.size(), 0);
+
+        MessageHistory new_reg{
+            get_time(),
+            current_client.nickname,
+            message
+        };
+        auto& queue = global_history[target_channel];
+        queue.push_back(new_reg);
+        if (queue.size() > 50) {
+            queue.pop_front();
+        }
+
         std::string worldwidenoise = "300 " + target_channel + " " + current_client.nickname + ": " + message + "\r\n";
         for (int member_fd: members) {
             if (member_fd != client_fd) {
@@ -401,7 +502,7 @@ int main() {
                     
                     // Lo mismo pero el stream vino de http
                     if (clients[i].type == ConnectType::HTTP and clients[i].read_buffer.size() > 8192) {
-                        std::string http_oopsie_400 = "HTTP 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMucho texto (mensaje muy largo)\n";
+                        std::string http_oopsie_400 = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMucho texto (mensaje muy largo)\n";
                         send(fds[i].fd, http_oopsie_400.c_str(), http_oopsie_400.size(), 0);
                         close(fds[i].fd);
                         fds.erase(fds.begin() + i);
@@ -429,9 +530,7 @@ int main() {
                         // Entonces es de HTTP
                         else {
                             std::cout << "Request HTTP recibido de " << fds[i].fd << std::endl;
-
-                            std::string dummy_ans = "HTTP 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 12\n\rConnection: close\r\n\r\nRecibi tu commando, no hare nada con el\n";
-                            send(fds[i].fd, dummy_ans.c_str(), dummy_ans.size(), 0);
+                            process_request(i, fds, clients, pure_mesage, channels);
                             close(fds[i].fd);
                             fds.erase(fds.begin() + i);
                             clients.erase(clients.begin() + i);
