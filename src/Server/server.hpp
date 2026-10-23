@@ -12,12 +12,23 @@
 #include <poll.h>
 #include <unistd.h>
 #include <cstring>
+#include <deque>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 //constantes utiles
 
 enum class ConnectType {
     CHAT,
     HTTP
+};
+
+//contenedor para historial de mensajes
+struct MessageHistory {
+    std::string time;
+    std::string nick;
+    std::string text;
 };
 
 //contenedor de estado de cliente
