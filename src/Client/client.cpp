@@ -41,8 +41,10 @@ int main(int argc, char* argv[]) {
     address.sin_family = AF_INET;
     address.sin_port = htons(puerto);
 
-    if(inet_pton(AF_INET, ip.c_str(), &address.sin_addr) <= 0) {
-        std::cerr << "Error: Direccion IP no tiene formato valido \n";
+    if (ip == "localhost") {
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    } else if (inet_pton(AF_INET, ip.c_str(), &address.sin_addr) != 1) {
+        std::cerr << "Error: ingresa una IPv4 valida o localhost\n";
         return 1;
     }
 
