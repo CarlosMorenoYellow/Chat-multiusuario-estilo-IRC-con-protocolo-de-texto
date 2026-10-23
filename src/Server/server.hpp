@@ -16,6 +16,10 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <fstream>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 //constantes utiles
 
@@ -40,6 +44,8 @@ struct ClientInfo {
     bool verifiedName = false;
     std::vector<std::string> channels;
     bool baddie_bad = false;
+    std::vector<std::string> session_messages;
+    std::vector<bool> deletion;
 };
 
 //espacio para declarar funciones

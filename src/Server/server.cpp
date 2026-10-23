@@ -3,6 +3,68 @@
 #include "../Commons/Protocol.cpp"
 
 std::map<std::string, std::deque<MessageHistory>> global_history;
+std::string global_mailbox = "";
+
+// Fecha para RFC
+std::string rfcDate() {
+    std::time_t now = std::time(nullptr);
+    std::tm* info = std::localtime(&now);
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S %z", info);
+    return std::string(buf);
+}
+
+// Funcion para guardar mensajes en disco
+void save_to_disc(const std::string& sender, const std::string& receiver, const std::string&text) {
+    std::string user_dir = global_mailbox + "/" + receiver;
+    std::string filepath = user_dir + "/" + std::to_string(std::time(nullptr)) + "_" + sender + ".msg";
+
+    std::ofstream file(filepath);
+    if (!file.is_open()) return;
+
+    file << "From: " << sender << "@chat.ci4835\r\n";
+    file << "To: " << receiver << "@chat.ci4835\r\n";
+    file << "Date: " << rfcDate() << "\r\n";
+    file << "Subject: Mensaje privado de " << sender << "\r\n";
+    file << "Message-ID: <" << std::time(nullptr) << "." << sender << "@chat.ci4835\r\n";
+    file << "\r\n";
+    file << text << "\r\n";
+    file.close();
+
+}
+
+// Funcion para crear el contexto del buzon de un usuario
+void create_box(ClientInfo& Client) {
+    std::string user_path = global_mailbox + "/" + Client.nickname;
+    DIR* dir = opendir(user_path.c_str());
+    if(!dir) return;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string filename = entry->d_name;
+        if (filename != "." and filename != "..") {
+            Client.session_messages.push_back(user_path + "/" + filename);
+            Client.deletion.push_back(false);
+        }
+    }
+
+    closedir(dir);
+    std::sort(Client.session_messages.begin(), Client.session_messages.end());
+}
+
+// Verificador de existencia de buzon de usuario
+bool user_dir_exists(const std::string& nickname) {
+    std::string user_path = global_mailbox + "/" + nickname;
+    struct stat info;
+    return (stat(user_path.c_str(), &info) == 0 and (info.st_mode & S_IFDIR));
+}
+
+void create_dir(const std::string& nickname) {
+    if (!user_dir_exists(nickname)) {
+        std::string user_path = global_mailbox + "/" + nickname;
+        mkdir(user_path.c_str(), 0777);
+    }
+}
+
 
 // Fucion para obtener hora
 std::string get_time() {
@@ -127,12 +189,18 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
     ClientInfo& current_client = clients[index];
 
     if (!current_client.verifiedName and cmd != "NICK" and cmd != "QUIT") {
-        std::string oopsie_530 = "530 No te has gesitrado con NICK\r\n";
+        std::string oopsie_530 = "530 No te has registrado con NICK\r\n";
         send(client_fd, oopsie_530.c_str(), oopsie_530.size(), 0);
         return;
     }
 
     if (cmd == "NICK") {
+        if (current_client.verifiedName) {
+            std::string oopsie_501 = "501 No puedes cambiar tu apodo, ya tienes uno";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
         if (args.empty()) {
             std::string oopsie_501 = "501 Sintaxis invalida, debes escribir un nombre\r\n";
             send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
@@ -155,23 +223,33 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
 
         current_client.nickname = args;
         current_client.verifiedName = true;
+        create_dir(args);
+        create_box(current_client);
 
         std::string goodie_201 = "201 Bienvenido(a), " + args + "\r\n";
         send(client_fd, goodie_201.c_str(), goodie_201.size(), 0);
         std::cout << client_fd << " se ha logueado con el apodo " << args << std::endl;
+
+        if (!current_client.session_messages.empty()) {
+            std::string woah_303 = "303 Tienes " + std::to_string(current_client.session_messages.size()) + " mensajes!\r\n";
+            send(client_fd, woah_303.c_str(), woah_303.size(), 0);
+        }
     }
     else if (cmd == "QUIT") {
         std::string goodie_299 = "299 Bye bye!\r\n";
         send(client_fd, goodie_299.c_str(), goodie_299.size(), 0);
-        std::cout << client_fd << " se esta largando con QUIT" << std::endl;
+
+        for (size_t i = 0; i < current_client.session_messages.size(); ++i) {
+            if (current_client.deletion[i]) {
+                std::remove(current_client.session_messages[i].c_str());
+            }
+        }
 
         for (const auto& channel: current_client.channels) {
             auto& members = channels[channel];
             std::string quit_message = "302 " + channel + " " + current_client.nickname + " cerro sesion\r\n";
             for(int member_fd: members) {
-                if (member_fd != client_fd) {
-                    send(member_fd, quit_message.c_str(), quit_message.size(), 0);
-                }
+                if (member_fd != client_fd) send(member_fd, quit_message.c_str(), quit_message.size(), 0);
             }
         }
 
@@ -332,7 +410,117 @@ void process_command(size_t index, std::vector<pollfd>& fds, std::vector<ClientI
         response_buffer += "212 " + std::to_string(total_channels) + " canales\r\n";
         send(client_fd, response_buffer.c_str(), response_buffer.size(), 0);
     }
-    
+
+    else if (cmd == "PRIV") {
+        size_t space = args.find(" ");
+        if (args.empty() or space == std::string::npos) {
+            std::string oopsie_501 = "501 Sintaxis invalida. Debes colocar el usuario que deseas mensajear y el mensaje\r\n";
+            send(client_fd, oopsie_501.c_str(), oopsie_501.size(), 0);
+            return;
+        }
+
+        std::string target_nick = args.substr(0, space);
+        std::string text = args.substr(space + 1);
+
+        int target_fd = -1;
+        for (const auto& client: clients) {
+            if (client.type == ConnectType::CHAT and client.nickname == target_nick) {
+                target_fd = client.fd;
+                break;
+            }
+        }
+
+        if (target_fd != -1) { 
+            std::string goodie_250 = "250 OK\r\n"; 
+            send(client_fd, goodie_250.c_str(), goodie_250.size(), 0);
+            std::string live_msg = "301 " + current_client.nickname + " " + text + "\r\n"; 
+            send(target_fd, live_msg.c_str(), live_msg.size(), 0); 
+        }
+        
+        else if (user_dir_exists(target_nick)) { 
+            save_to_disc(current_client.nickname, target_nick, text); 
+            std::string saved_251 = "251 Mensaje guardado en buzon\r\n"; 
+            send(client_fd, saved_251.c_str(), saved_251.size(), 0); 
+        }
+        else { 
+            std::string oopsie_550 = "550 Usuario desconocido\r\n";
+            send(client_fd, oopsie_550.c_str(), oopsie_550.size(), 0);
+        }
+    }
+    else if (cmd == "STAT") {
+        size_t active_count = 0;
+        size_t total_bytes = 0;
+
+        for (size_t i = 0; i < current_client.session_messages.size(); ++i) {
+            if (!current_client.deletion[i]) {
+                active_count++;
+                struct stat st;
+                if (stat(current_client.session_messages[i].c_str(), &st) == 0) {
+                    total_bytes += st.st_size;
+                }
+            }
+        }
+        std::string res = "220 " + std::to_string(active_count) + " " + std::to_string(total_bytes) + "\r\n";
+        send(client_fd, res.c_str(), res.size(), 0);
+    }
+
+    else if (cmd == "LIST") {
+        std::string buffer = "";
+        size_t active_count = 0;
+
+        for (size_t i = 0; i < current_client.session_messages.size(); ++i) {
+            if (!current_client.deletion[i]) {
+                active_count++;
+                struct stat st;
+                size_t file_size = 0;
+                if (stat(current_client.session_messages[i].c_str(), &st) == 0) {
+                    file_size = st.st_size;
+                }
+                buffer += "221-" + std::to_string(i + 1) + " " + std::to_string(file_size) + "\r\n";
+            }
+        }
+        buffer += "221 " + std::to_string(active_count) + " mensajes\r\n";
+        send(client_fd, buffer.c_str(), buffer.size(), 0);
+    }
+
+    else if (cmd == "RETR") {
+        if (args.empty()) {
+            send(client_fd, "501 Especifica el numero de mensaje\r\n", 37, 0);
+            return;
+        }
+        int msg_num = std::stoi(args) - 1;
+        if (msg_num < 0 or msg_num >= (int)current_client.session_messages.size() or current_client.deletion[msg_num]) {
+            send(client_fd, "552 No existe ese numero de mensaje en el buzon\r\n", 49, 0);
+            return;
+        }
+
+        std::ifstream file(current_client.session_messages[msg_num]);
+        std::string line, file_buffer = "";
+        while (std::getline(file, line)) {
+            // Append line with standard email formatting prefix token
+            file_buffer += "222-" + line + "\n"; // Preserve inner newlines natively
+        }
+        file.close();
+        
+        file_buffer += "222 fin del mensaje\r\n";
+        send(client_fd, file_buffer.c_str(), file_buffer.size(), 0);
+    }
+
+    else if (cmd == "DELE") {
+        if (args.empty()) {
+            send(client_fd, "501 Especifica el numero de mensaje\r\n", 37, 0);
+            return;
+        }
+        int msg_num = std::stoi(args) - 1;
+        if (msg_num < 0 or msg_num >= (int)current_client.session_messages.size() or current_client.deletion[msg_num]) {
+            send(client_fd, "552 No existe ese numero de mensaje en el buzon\r\n", 49, 0);
+            return;
+        }
+
+        current_client.deletion[msg_num] = true;
+        std::string res = "223 Mensaje " + args + " marcado para borrar\r\n";
+        send(client_fd, res.c_str(), res.size(), 0);
+    }
     else {
         std::string oopsie_500 = "500 Comando desconocido\r\n";
         send(client_fd, oopsie_500.c_str(), oopsie_500.size(), 0);
@@ -379,9 +567,30 @@ int socket_plocket(int port){
     return socket_space;
 }
 
-int main() {
-    int chat_port = 5000;
-    int http_port = 8080;
+int main(int argc, char* argv[]) {
+
+    int chat_port = -1;
+    int http_port = -1;
+
+    for (int i = 1; i < argc; i++) {
+        std::string flag = argv[i];
+        if (flag == "--chat" and i + 1 < argc) {
+            chat_port = std::stoi(argv[++i]);
+        }
+        else if (flag == "--http" and i + 1 < argc) {
+            http_port = std::stoi(argv[i++]);
+        }
+        else if (flag == "--buzones" and i + 1  < argc) {
+            global_mailbox = argv[++i];
+        }
+    }
+
+    if (chat_port == -1 or http_port == -1 or global_mailbox.empty()) {
+        std::cerr << "Faltan datos, recuerde llenar todos los flags\n";
+        return 1;
+    }
+    
+    mkdir(global_mailbox.c_str(), 0777);
     int chat_space = socket_plocket(chat_port);
     int http_space = socket_plocket(http_port);
 
@@ -394,9 +603,9 @@ int main() {
     std::vector<pollfd> fds;
     std::vector<ClientInfo> clients;
     fds.push_back({chat_space, POLLIN, 0});
-    clients.push_back({chat_space, ConnectType::CHAT, "", "", false, {}, false});
+    clients.push_back({chat_space, ConnectType::CHAT, "", "", false, {}, false, {}, {}});
     fds.push_back({http_space, POLLIN, 0});
-    clients.push_back({http_space, ConnectType::HTTP, "", "", false, {}, false});
+    clients.push_back({http_space, ConnectType::HTTP, "", "", false, {}, false, {}, {}});
 
     // Tambien creemos los canales
     std::map<std::string, std::vector<int>> channels;
@@ -426,7 +635,7 @@ int main() {
                 int new_client = accept(chat_space, nullptr, nullptr);
                 if (new_client >= 0) {
                     fds.push_back({new_client, POLLIN, 0});
-                    clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}, false});
+                    clients.push_back({new_client, ConnectType::CHAT, "", "", false, {}, false, {}, {}});
                     std::cout << "Nuevo cliente añadido por chat " << new_client << std::endl;
                     std::string greet = "200 chat de prueba listo\r\n";
                     send(new_client, greet.c_str(), greet.size(), 0);
@@ -438,7 +647,7 @@ int main() {
                 int new_requester = accept(http_space, nullptr, nullptr);
                 if (new_requester >= 0) {
                     fds.push_back({new_requester, POLLIN, 0});
-                    clients.push_back({new_requester, ConnectType::HTTP, "", "", false, {}, false});
+                    clients.push_back({new_requester, ConnectType::HTTP, "", "", false, {}, false, {}, {}});
                     std::cout << "Nueva peticion por http con fd " << new_requester << std::endl; 
                 }
             }
@@ -544,5 +753,6 @@ int main() {
 
     close(chat_space);
     close(http_space);
+    std::cout << "Cerrando, adios..." << std::endl;
     return 0;
 }
