@@ -1,10 +1,4 @@
-# Network Chat Protocol (NCP) Specification
-
-## Estado de este documento
-
-Este documento describe el protocolo de chat que implementa actualmente el
-proyecto. Usa una estructura inspirada en RFC para facilitar su lectura; no es
-un RFC publicado ni implica compatibilidad con IRC.
+# Network Chat Protocol (NCP)
 
 ## 1. Introduccion
 
@@ -22,7 +16,7 @@ un RFC publicado ni implica compatibilidad con IRC.
 - Los comandos no distinguen mayúsculas de minúsculas. Los argumentos conservan
 	sus mayúsculas y minúsculas; apodos y nombres de canal, por tanto, se comparan distinguiendo mayúsculas.
 - La implementación separa el comando de sus argumentos usando el primer
-	espacio ASCII. No admite tabulador como separador de comando.
+	espacio. No admite tabulador como separador de comando.
 - Los argumentos no tienen sintaxis de comillas ni mecanismo de escape.
 
 En los ejemplos, `C:` identifica datos enviados por el cliente y `S:` datos
@@ -54,10 +48,10 @@ los códigos definidos en el encabezado pero todavía no conectados a un comando
 | Código | Significado |
 | --- | --- |
 | 200 | Saludo de conexión de chat |
-| 201 | Apodo registrado o cambiado |
+| 201 | Apodo registrado |
 | 210 | Unión a canal confirmada |
 | 211 | Salida de canal confirmada |
-| 212 | Respuesta multilinea de CHANS; una linea 212-<#canal> <n> por canal y una final 212 <total> canales |
+| 212 | Respuesta multilinea de CHANS; una linea 212-<#canal> <n> por canal (n son miembros) y una final 212 <total> canales |
 | 213 | Miembro de canal y total de miembros |
 | 220 | Respuesta de STAT |
 | 221 | Respuesta multilinea de LIST. Una linea 221-<numero> <bytes> por mensaje y una final 221 <n> mensajes|
@@ -87,35 +81,35 @@ los códigos definidos en el encabezado pero todavía no conectados a un comando
 ### Registro y publicación
 
 ```text
-S: 200 chat de prueba listo\r\n
-C: NICK ana\r\n
-S: 201 Bienvenido(a), ana\r\n
-C: JOIN #redes\r\n
-S: 210 Te uniste a #redes\r\n
-C: MSG #redes hola\r\n
-S: 250 OK!\r\n
+S: 200 chat de prueba listo
+C: NICK ana
+S: 201 Bienvenido(a), ana
+C: JOIN #redes
+S: 210 Te uniste a #redes
+C: MSG #redes hola
+S: 250 OK!
 ```
 
 Cada otro miembro de `#redes` recibe:
 
 ```text
-S: 300 #redes ana: hola\r\n
+S: 300 #redes ana: hola
 ```
 
 ### Error por falta de registro
 
 ```text
-C: WHO #redes\r\n
-S: 530 No te has gesitrado con NICK\r\n
+C: WHO #redes
+S: 530 No te has gesitrado con NICK
 ```
 
 ### Consulta de miembros
 
 ```text
-C: WHO #redes\r\n
-S: 213-ana\r\n
-S: 213-luis\r\n
-S: 213 2 miembros\r\n
+C: WHO #redes
+S: 213-ana
+S: 213-luis
+S: 213 2 miembros
 ```
 
 ## 6. Casos borde y decisiones actuales
@@ -123,8 +117,7 @@ S: 213 2 miembros\r\n
 - **MSG a uno mismo:** si el emisor es miembro del canal, recibe `250 OK!`, pero
 	no recibe evento `300` por su propio mensaje. El servidor excluye al socket
 	emisor al distribuir el evento.
-- **PRIV al mismo usuario o a otro:** no aplica todavía; el comando `PRIV` no
-	existe. Después del registro produce `500`; antes del registro produce `530`.
+- **PRIV al mismo usuario o a otro:** Se envia un correo a si mismo, funciona como cualquier otro usuario
 - **Canales vacíos:** al salir el último miembro con `PART` o al desconectarse,
 	el canal se elimina. Un `MSG` o `WHO` posterior para ese canal da `551` hasta
 	que alguien vuelva a crearlo con `JOIN`.
@@ -141,5 +134,6 @@ S: 213 2 miembros\r\n
 	línea parcial. Varias líneas completas recibidas juntas se procesan en orden.
 - **Línea larga:** el servidor responde `502` y descarta datos hasta encontrar
 	un `CRLF`. El límite operativo se mide en bytes, no en caracteres Unicode.
-- **Desconexión abrupta:** el servidor quita al socket desconectado de sus
-	canales y elimina aquellos que queden vacíos.
+- **Desconexión abrupta:** el servidor quita al socket desconectado de sus canales y elimina aquellos que queden vacíos.
+- **Usuario hace join a un canal en el que ya esta:** Manda verificacion al usuario de que se unio y se lee en el servidor su accion, mas no crea una segunda instancia del usuario. Efectivamente no hace nada.
+- **Usuario usa nick por segunda vez:**

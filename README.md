@@ -91,7 +91,7 @@ otra terminal:
 ```bash
 curl http://localhost:8080/usuarios
 curl http://localhost:8080/canales
-curl http://localhost:8080/historial/redes
+curl http://localhost:8080/historial/<canal>
 ```
 
 El historial contiene hasta los últimos 50 mensajes del canal mientras este
